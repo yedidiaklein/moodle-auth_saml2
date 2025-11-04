@@ -711,9 +711,22 @@ class auth extends \auth_plugin_base {
                 $this->log(__FUNCTION__ . " numeric insensitive compare for $uid");
                 $numericinsensitive = true;
             }
-            if ($user = user_extractor::get_user($this->config->mdlattr, $uid, $insensitive, $accentsensitive, $numericinsensitive)) {
+            
+            // Debug: Log the user extraction attempt.
+            $this->log(__FUNCTION__ . " calling user_extractor::get_user with: " .
+                      "mdlattr='{$this->config->mdlattr}', uid='$uid', " .
+                      "insensitive=" . ($insensitive ? 'true' : 'false') . ", " .
+                      "accentsensitive=" . ($accentsensitive ? 'true' : 'false') . ", " .
+                      "numericinsensitive=" . ($numericinsensitive ? 'true' : 'false'));
+            
+            $user = user_extractor::get_user($this->config->mdlattr, $uid, $insensitive,
+                                             $accentsensitive, $numericinsensitive);
+            if ($user) {
                 // We found a user.
+                $this->log(__FUNCTION__ . " user_extractor returned user: {$user->username} (ID: {$user->id})");
                 break;
+            } else {
+                $this->log(__FUNCTION__ . " user_extractor returned false - no user found");
             }
         }
 
