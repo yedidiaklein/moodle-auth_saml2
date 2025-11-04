@@ -340,4 +340,54 @@ class auth_saml2_user_extractor_test extends advanced_testcase {
         $this->assertFalse($actual);
     }
 
+    /**
+     * Test getting user with numeric insensitive matching.
+     *
+     * @covers \auth_saml2\user_extractor::get_user
+     */
+    public function test_get_user_numeric_insensitive_matching() {
+        $this->resetAfterTest();
+
+        // Test with regular user fields.
+        $user1 = $this->getDataGenerator()->create_user(['idnumber' => '0012345']);
+        $user2 = $this->getDataGenerator()->create_user(['idnumber' => '67890']);
+
+        // Test numeric insensitive matching.
+        $actual = user_extractor::get_user('idnumber', '12345', false, true, true);
+        $this->assertNotFalse($actual);
+        $this->assertSame($user1->id, $actual->id);
+
+        // Test that leading zeros are normalized.
+        $actual = user_extractor::get_user('idnumber', '000012345', false, true, true);
+        $this->assertNotFalse($actual);
+        $this->assertSame($user1->id, $actual->id);
+
+        // Test that it finds exact numeric match.
+        $actual = user_extractor::get_user('idnumber', '67890', false, true, true);
+        $this->assertNotFalse($actual);
+        $this->assertSame($user2->id, $actual->id);
+
+        // Test with custom profile field.
+        $field = $this->add_user_profile_field('numericfield', 'text');
+        $user3 = $this->getDataGenerator()->create_user();
+        profile_save_data((object)['id' => $user3->id, 'profile_field_' . $field->shortname => '0098765']);
+
+        // Test numeric insensitive matching with profile field.
+        $actual = user_extractor::get_user('profile_field_numericfield', '98765', false, true, true);
+        $this->assertNotFalse($actual);
+        $this->assertSame($user3->id, $actual->id);
+
+        // Test that non-numeric values still work normally.
+        $actual = user_extractor::get_user('idnumber', 'non-numeric', false, true, true);
+        $this->assertFalse($actual);
+
+        // Test that regular matching still works when numeric insensitive is disabled.
+        $actual = user_extractor::get_user('idnumber', '12345', false, true, false);
+        $this->assertFalse($actual); // Should not match because stored value is '0012345'.
+
+        $actual = user_extractor::get_user('idnumber', '0012345', false, true, false);
+        $this->assertNotFalse($actual); // Should match exact string.
+        $this->assertSame($user1->id, $actual->id);
+    }
+
 }

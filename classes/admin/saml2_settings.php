@@ -54,4 +54,6 @@ abstract class saml2_settings {
     const OPTION_TOLOWER_CASE_INSENSITIVE = 2;
     /** @var int Option tolower case and accent insensitive */
     const OPTION_TOLOWER_CASE_AND_ACCENT_INSENSITIVE = 3;
+    /** @var int Option tolower numeric insensitive */
+    const OPTION_TOLOWER_NUMERIC_INSENSITIVE = 4;
 }

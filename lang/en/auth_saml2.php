@@ -202,10 +202,12 @@ $string['tolower:exact'] = 'Exact';
 $string['tolower:lowercase'] = 'Lower case';
 $string['tolower:caseandaccentinsensitive'] = 'Case and accent insensitive';
 $string['tolower:caseinsensitive'] = 'Case insensitive';
+$string['tolower:numericinsensitive'] = 'Numeric insensitive';
 $string['tolower_help'] = '
 <p>Exact: match is case sensitive (default).</p>
 <p>Lower case: applies lower case to the IdP attribute before matching.</p>
-<p>Case insensitive: ignore case when matching.</p>';
+<p>Case insensitive: ignore case when matching.</p>
+<p>Numeric insensitive: treat numeric values as equal regardless of leading zeros (e.g., "012" matches "12").</p>';
 $string['wrongauth'] = 'You have logged in successfully as \'{$a}\' but are not authorized to access Moodle.';
 $string['auth_data_mapping'] = 'Data mapping';
 $string['auth_fieldlockfield'] = 'Lock value ({$a})';
