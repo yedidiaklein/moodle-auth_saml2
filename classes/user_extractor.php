@@ -97,16 +97,17 @@ class user_extractor {
                 if ($DB->get_dbfamily() === 'postgres') {
                     $fieldsql = " AND d.data ~ '^[0-9]*\.?[0-9]+$' AND CAST(d.data AS DECIMAL) = CAST(:numericvalue AS DECIMAL)";
                 } else if ($DB->get_dbfamily() === 'mysql') {
-                    // Use string comparison of normalized values for MySQL compatibility.
-                    $normalizedvalue = (string)$targetvalue;
-                    $fieldsql = " AND (TRIM(LEADING '0' FROM d.data) = :normalizedvalue " .
-                               " OR (d.data + 0) = :numericvalue)";
+                    // MySQL: Use LTRIM to remove leading zeros and string comparison.
+                    $normalizedvalue = ltrim($fieldvalue, '0') ?: '0';
+                    $fieldsql = " AND (d.data = :fieldvalue OR LTRIM(d.data, '0') = :normalizedvalue)";
                     $params['normalizedvalue'] = $normalizedvalue;
                 } else {
                     // Fallback: for other databases, try basic CAST (SQLite, MSSQL, etc.).
                     $fieldsql = " AND CAST(d.data AS REAL) = CAST(:numericvalue AS REAL)";
                 }
-                $params['numericvalue'] = (string)$targetvalue;
+                if ($DB->get_dbfamily() !== 'mysql') {
+                    $params['numericvalue'] = (string)$targetvalue;
+                }
                 $debuglog("Custom field: Using SQL-based numeric insensitive matching for value: $targetvalue");
             } else {
                 $fieldsql = " AND " . $DB->sql_equal('d.data', ':fieldvalue', !$insensitive, $accentsensitive);
@@ -127,16 +128,17 @@ class user_extractor {
                         $fieldsql = " AND u.$fieldname ~ '^[0-9]*\.?[0-9]+$' " .
                                    " AND CAST(u.$fieldname AS DECIMAL) = CAST(:numericvalue AS DECIMAL)";
                     } else if ($DB->get_dbfamily() === 'mysql') {
-                        // Use string comparison of normalized values for MySQL compatibility.
-                        $normalizedvalue = (string)$targetvalue;
-                        $fieldsql = " AND (TRIM(LEADING '0' FROM u.$fieldname) = :normalizedvalue " .
-                                   " OR (u.$fieldname + 0) = :numericvalue)";
+                        // MySQL: Use LTRIM to remove leading zeros and string comparison.
+                        $normalizedvalue = ltrim($fieldvalue, '0') ?: '0';
+                        $fieldsql = " AND (u.$fieldname = :fieldvalue OR LTRIM(u.$fieldname, '0') = :normalizedvalue)";
                         $params['normalizedvalue'] = $normalizedvalue;
                     } else {
                         // Fallback: for other databases, try basic CAST (SQLite, MSSQL, etc.).
                         $fieldsql = " AND CAST(u.$fieldname AS REAL) = CAST(:numericvalue AS REAL)";
                     }
-                    $params['numericvalue'] = (string)$targetvalue;
+                    if ($DB->get_dbfamily() !== 'mysql') {
+                        $params['numericvalue'] = (string)$targetvalue;
+                    }
                     $debuglog("Regular field: Using SQL-based numeric insensitive matching for value: $targetvalue");
                 } else {
                     $fieldsql = " AND " . $DB->sql_equal('u.' . $fieldname, ':fieldvalue', !$insensitive, $accentsensitive);
