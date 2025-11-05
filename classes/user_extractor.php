@@ -60,12 +60,11 @@ class user_extractor {
         $originalfieldvalue = $fieldvalue;
 
         // Debug logging function.
-        $debuglog = function($msg) {
+        $debuglog = function($msg) use ($CFG) {
             debugging('auth_saml2_user_extractor: ' . $msg, DEBUG_DEVELOPER);
             // Also log to file for easier debugging.
-            if (file_exists('/tmp/')) {
-                file_put_contents('/tmp/saml2_debug.log', date('Y-m-d H:i:s') . " - " . $msg . "\n", FILE_APPEND);
-            }
+            $logfile = $CFG->dataroot . '/saml2.log';
+            file_put_contents($logfile, date('Y-m-d H:i:s') . " - " . $msg . "\n", FILE_APPEND | LOCK_EX);
         };
 
         $debuglog("get_user called with: fieldname='$fieldname', fieldvalue='$originalfieldvalue', " .
