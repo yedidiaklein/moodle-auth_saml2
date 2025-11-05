@@ -98,9 +98,10 @@ class user_extractor {
                     $fieldsql = " AND d.data ~ '^[0-9]*\.?[0-9]+$' AND CAST(d.data AS DECIMAL) = CAST(:numericvalue AS DECIMAL)";
                 } else if ($DB->get_dbfamily() === 'mysql') {
                     // MySQL: Use LTRIM to remove leading zeros and string comparison.
-                    $normalizedvalue = ltrim($fieldvalue, '0') ?: '0';
-                    $fieldsql = " AND (d.data = :fieldvalue OR LTRIM(d.data, '0') = :normalizedvalue)";
-                    $params['normalizedvalue'] = $normalizedvalue;
+                    // Use original value for both exact match and normalized comparison.
+                    $fieldsql = " AND (d.data = :originalvalue OR LTRIM(d.data, '0') = :fieldvalue)";
+                    $params['originalvalue'] = $originalfieldvalue;
+                    $debuglog("MySQL: originalvalue='$originalfieldvalue', normalizedvalue='$fieldvalue'");
                 } else {
                     // Fallback: for other databases, try basic CAST (SQLite, MSSQL, etc.).
                     $fieldsql = " AND CAST(d.data AS REAL) = CAST(:numericvalue AS REAL)";
@@ -129,9 +130,10 @@ class user_extractor {
                                    " AND CAST(u.$fieldname AS DECIMAL) = CAST(:numericvalue AS DECIMAL)";
                     } else if ($DB->get_dbfamily() === 'mysql') {
                         // MySQL: Use LTRIM to remove leading zeros and string comparison.
-                        $normalizedvalue = ltrim($fieldvalue, '0') ?: '0';
-                        $fieldsql = " AND (u.$fieldname = :fieldvalue OR LTRIM(u.$fieldname, '0') = :normalizedvalue)";
-                        $params['normalizedvalue'] = $normalizedvalue;
+                        // Use original value for both exact match and normalized comparison.
+                        $fieldsql = " AND (u.$fieldname = :originalvalue OR LTRIM(u.$fieldname, '0') = :fieldvalue)";
+                        $params['originalvalue'] = $originalfieldvalue;
+                        $debuglog("MySQL: originalvalue='$originalfieldvalue', normalizedvalue='$fieldvalue'");
                     } else {
                         // Fallback: for other databases, try basic CAST (SQLite, MSSQL, etc.).
                         $fieldsql = " AND CAST(u.$fieldname AS REAL) = CAST(:numericvalue AS REAL)";
