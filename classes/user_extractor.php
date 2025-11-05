@@ -91,9 +91,20 @@ class user_extractor {
             $joins .= " LEFT JOIN {user_info_data} d ON d.fieldid = f.id AND d.userid = u.id ";
 
             if ($numericinsensitive && is_numeric($fieldvalue)) {
-                // For numeric insensitive matching, we get records where the field exists and filter numerically in PHP.
-                $fieldsql = " AND d.data IS NOT NULL";
-                $debuglog("Custom field: Using numeric insensitive matching, will filter in PHP");
+                // For numeric insensitive matching, use CAST to convert to numeric in SQL.
+                $targetvalue = (float)$fieldvalue;
+                // Use a regex to ensure the field contains only numeric data, then cast and compare.
+                if ($DB->get_dbfamily() === 'postgres') {
+                    $fieldsql = " AND d.data ~ '^[0-9]*\.?[0-9]+$' AND CAST(d.data AS DECIMAL) = CAST(:numericvalue AS DECIMAL)";
+                } else if ($DB->get_dbfamily() === 'mysql') {
+                    $fieldsql = " AND d.data REGEXP '^[0-9]*\.?[0-9]+$' " .
+                               " AND CAST(d.data AS DECIMAL(20,10)) = CAST(:numericvalue AS DECIMAL(20,10))";
+                } else {
+                    // Fallback: for other databases, try basic CAST (SQLite, MSSQL, etc.).
+                    $fieldsql = " AND CAST(d.data AS REAL) = CAST(:numericvalue AS REAL)";
+                }
+                $params['numericvalue'] = $targetvalue;
+                $debuglog("Custom field: Using SQL-based numeric insensitive matching for value: $targetvalue");
             } else {
                 $fieldsql = " AND " . $DB->sql_equal('d.data', ':fieldvalue', !$insensitive, $accentsensitive);
                 $debuglog("Custom field: Using regular SQL matching");
@@ -106,9 +117,21 @@ class user_extractor {
             if (in_array($fieldname, $fields)) {
                 $debuglog("Regular user field detected: '$fieldname'");
                 if ($numericinsensitive && is_numeric($fieldvalue)) {
-                    // For numeric insensitive matching, we get records where the field is not null and filter numerically in PHP.
-                    $fieldsql = " AND u.$fieldname IS NOT NULL AND u.$fieldname != ''";
-                    $debuglog("Regular field: Using numeric insensitive matching, will filter in PHP");
+                    // For numeric insensitive matching, use CAST to convert to numeric in SQL.
+                    $targetvalue = (float)$fieldvalue;
+                    // Use a regex to ensure the field contains only numeric data, then cast and compare.
+                    if ($DB->get_dbfamily() === 'postgres') {
+                        $fieldsql = " AND u.$fieldname ~ '^[0-9]*\.?[0-9]+$' " .
+                                   " AND CAST(u.$fieldname AS DECIMAL) = CAST(:numericvalue AS DECIMAL)";
+                    } else if ($DB->get_dbfamily() === 'mysql') {
+                        $fieldsql = " AND u.$fieldname REGEXP '^[0-9]*\.?[0-9]+$' " .
+                                   " AND CAST(u.$fieldname AS DECIMAL(20,10)) = CAST(:numericvalue AS DECIMAL(20,10))";
+                    } else {
+                        // Fallback: for other databases, try basic CAST (SQLite, MSSQL, etc.).
+                        $fieldsql = " AND CAST(u.$fieldname AS REAL) = CAST(:numericvalue AS REAL)";
+                    }
+                    $params['numericvalue'] = $targetvalue;
+                    $debuglog("Regular field: Using SQL-based numeric insensitive matching for value: $targetvalue");
                 } else {
                     $fieldsql = " AND " . $DB->sql_equal('u.' . $fieldname, ':fieldvalue', !$insensitive, $accentsensitive);
                     $debuglog("Regular field: Using regular SQL matching");
@@ -120,87 +143,29 @@ class user_extractor {
         }
 
         if (!empty($fieldsql)) {
-            // For numeric insensitive matching, we need to select the field values too for comparison.
-            if ($numericinsensitive && is_numeric($fieldvalue)) {
-                $debuglog("Starting numeric insensitive search");
-                $targetvalue = (float)$fieldvalue;
-                $debuglog("Target numeric value: $targetvalue");
+            // Build the SQL query (numeric filtering now happens in SQL, not PHP).
+            $sql = "SELECT u.id
+                      FROM {user} u $joins
+                     WHERE u.deleted <> 1
+                       AND u.mnethostid = :mnethostid $fieldsql";
+
+            $debuglog("SQL Query: $sql");
+            $debuglog("SQL Params: " . json_encode($params));
+
+            if ($records = $DB->get_records_sql($sql, $params)) {
+                $debuglog("Found " . count($records) . " matching records from database");
                 
-                if (user_fields::is_custom_profile_field($params['fieldname'] ?? '')) {
-                    $sql = "SELECT u.id, d.data as fieldval
-                              FROM {user} u $joins
-                             WHERE u.deleted <> 1
-                               AND u.mnethostid = :mnethostid $fieldsql";
+                if (count($records) == 1) {
+                    $record = reset($records);
+                    $user = get_complete_user_data('id', $record->id);
+                    $debuglog("SUCCESS: Found single matching user with ID {$record->id}");
+                } else if (count($records) > 1) {
+                    $debuglog("ERROR: Multiple matching records found, cannot determine unique user");
                 } else {
-                    $sql = "SELECT u.id, u." . $fieldname . " as fieldval
-                              FROM {user} u $joins
-                             WHERE u.deleted <> 1
-                               AND u.mnethostid = :mnethostid $fieldsql";
-                }
-
-                $debuglog("SQL Query: $sql");
-                $debuglog("SQL Params: " . json_encode($params));
-
-                if ($records = $DB->get_records_sql($sql, $params)) {
-                    $debuglog("Found " . count($records) . " potential records from database");
-                    
-                    // Filter records by numeric comparison.
-                    $matchedrecords = [];
-
-                    foreach ($records as $record) {
-                        $debuglog("Checking record ID {$record->id} with fieldval '{$record->fieldval}'");
-                        
-                        if (is_numeric($record->fieldval)) {
-                            $dbvalue = (float)$record->fieldval;
-                            $debuglog("  Database value as float: $dbvalue");
-                            $debuglog("  Target value as float: $targetvalue");
-                            $debuglog("  Values equal: " . ($dbvalue === $targetvalue ? 'YES' : 'NO'));
-                            
-                            if ($dbvalue === $targetvalue) {
-                                $matchedrecords[] = $record;
-                                $debuglog("  MATCH FOUND for record ID {$record->id}");
-                            }
-                        } else {
-                            $debuglog("  Field value '{$record->fieldval}' is not numeric, skipping");
-                        }
-                    }
-
-                    $debuglog("Total matched records: " . count($matchedrecords));
-                    
-                    if (count($matchedrecords) == 1) {
-                        $record = reset($matchedrecords);
-                        $user = get_complete_user_data('id', $record->id);
-                        $debuglog("SUCCESS: Found single matching user with ID {$record->id}");
-                    } else if (count($matchedrecords) > 1) {
-                        $debuglog("ERROR: Multiple matching records found, cannot determine unique user");
-                    } else {
-                        $debuglog("No matching records found after numeric comparison");
-                    }
-                } else {
-                    $debuglog("No records returned from database query");
+                    $debuglog("No matching records found");
                 }
             } else {
-                $debuglog("Using regular (non-numeric) matching");
-                $sql = "SELECT u.id
-                          FROM {user} u $joins
-                         WHERE u.deleted <> 1
-                           AND u.mnethostid = :mnethostid $fieldsql";
-
-                $debuglog("SQL Query: $sql");
-                $debuglog("SQL Params: " . json_encode($params));
-
-                if ($records = $DB->get_records_sql($sql, $params)) {
-                    $debuglog("Found " . count($records) . " records from database");
-                    if (count($records) == 1) {
-                        $record = reset($records);
-                        $user = get_complete_user_data('id', $record->id);
-                        $debuglog("SUCCESS: Found single matching user with ID {$record->id}");
-                    } else {
-                        $debuglog("ERROR: Multiple records found, cannot determine unique user");
-                    }
-                } else {
-                    $debuglog("No records returned from database query");
-                }
+                $debuglog("No records returned from database query");
             }
         } else {
             $debuglog("No field SQL generated - check field name validity");
