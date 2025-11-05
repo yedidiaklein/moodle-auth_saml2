@@ -97,16 +97,19 @@ class user_extractor {
                 if ($DB->get_dbfamily() === 'postgres') {
                     $fieldsql = " AND d.data ~ '^[0-9]*\.?[0-9]+$' AND CAST(d.data AS DECIMAL) = CAST(:numericvalue AS DECIMAL)";
                 } else if ($DB->get_dbfamily() === 'mysql') {
-                    // MySQL: Use LTRIM to remove leading zeros and string comparison.
-                    // Use original value for both exact match and normalized comparison.
-                    $fieldsql = " AND (d.data = :originalvalue OR LTRIM(d.data, '0') = :fieldvalue)";
-                    $params['originalvalue'] = $originalfieldvalue;
-                    $debuglog("MySQL: originalvalue='$originalfieldvalue', normalizedvalue='$fieldvalue'");
+                    // MySQL: Use REGEXP for numeric matching to avoid LTRIM issues.
+                    // Match the normalized numeric value with optional leading zeros.
+                    $paddedpattern = '^0*' . preg_quote($fieldvalue, '/') . '$';
+                    $fieldsql = " AND (d.data = :fieldvalue OR d.data REGEXP :paddedpattern)";
+                    $params['paddedpattern'] = $paddedpattern;
+                    $debuglog("MySQL: fieldvalue='$fieldvalue', pattern='$paddedpattern'");
                 } else {
                     // Fallback: for other databases, try basic CAST (SQLite, MSSQL, etc.).
                     $fieldsql = " AND CAST(d.data AS REAL) = CAST(:numericvalue AS REAL)";
                 }
-                if ($DB->get_dbfamily() !== 'mysql') {
+                if ($DB->get_dbfamily() === 'postgres') {
+                    $params['numericvalue'] = (string)$targetvalue;
+                } else if ($DB->get_dbfamily() !== 'mysql') {
                     $params['numericvalue'] = (string)$targetvalue;
                 }
                 $debuglog("Custom field: Using SQL-based numeric insensitive matching for value: $targetvalue");
@@ -129,16 +132,19 @@ class user_extractor {
                         $fieldsql = " AND u.$fieldname ~ '^[0-9]*\.?[0-9]+$' " .
                                    " AND CAST(u.$fieldname AS DECIMAL) = CAST(:numericvalue AS DECIMAL)";
                     } else if ($DB->get_dbfamily() === 'mysql') {
-                        // MySQL: Use LTRIM to remove leading zeros and string comparison.
-                        // Use original value for both exact match and normalized comparison.
-                        $fieldsql = " AND (u.$fieldname = :originalvalue OR LTRIM(u.$fieldname, '0') = :fieldvalue)";
-                        $params['originalvalue'] = $originalfieldvalue;
-                        $debuglog("MySQL: originalvalue='$originalfieldvalue', normalizedvalue='$fieldvalue'");
+                        // MySQL: Use REGEXP for numeric matching to avoid LTRIM issues.
+                        // Match the normalized numeric value with optional leading zeros.
+                        $paddedpattern = '^0*' . preg_quote($fieldvalue, '/') . '$';
+                        $fieldsql = " AND (u.$fieldname = :fieldvalue OR u.$fieldname REGEXP :paddedpattern)";
+                        $params['paddedpattern'] = $paddedpattern;
+                        $debuglog("MySQL: fieldvalue='$fieldvalue', pattern='$paddedpattern'");
                     } else {
                         // Fallback: for other databases, try basic CAST (SQLite, MSSQL, etc.).
                         $fieldsql = " AND CAST(u.$fieldname AS REAL) = CAST(:numericvalue AS REAL)";
                     }
-                    if ($DB->get_dbfamily() !== 'mysql') {
+                    if ($DB->get_dbfamily() === 'postgres') {
+                        $params['numericvalue'] = (string)$targetvalue;
+                    } else if ($DB->get_dbfamily() !== 'mysql') {
                         $params['numericvalue'] = (string)$targetvalue;
                     }
                     $debuglog("Regular field: Using SQL-based numeric insensitive matching for value: $targetvalue");
@@ -162,20 +168,30 @@ class user_extractor {
             $debuglog("SQL Query: $sql");
             $debuglog("SQL Params: " . json_encode($params));
 
-            if ($records = $DB->get_records_sql($sql, $params)) {
-                $debuglog("Found " . count($records) . " matching records from database");
-                
-                if (count($records) == 1) {
-                    $record = reset($records);
-                    $user = get_complete_user_data('id', $record->id);
-                    $debuglog("SUCCESS: Found single matching user with ID {$record->id}");
-                } else if (count($records) > 1) {
-                    $debuglog("ERROR: Multiple matching records found, cannot determine unique user");
+            try {
+                if ($records = $DB->get_records_sql($sql, $params)) {
+                    $debuglog("Found " . count($records) . " matching records from database");
+                    
+                    if (count($records) == 1) {
+                        $record = reset($records);
+                        $user = get_complete_user_data('id', $record->id);
+                        $debuglog("SUCCESS: Found single matching user with ID {$record->id}");
+                    } else if (count($records) > 1) {
+                        $debuglog("ERROR: Multiple matching records found, cannot determine unique user");
+                    } else {
+                        $debuglog("No matching records found");
+                    }
                 } else {
-                    $debuglog("No matching records found");
+                    $debuglog("No records returned from database query");
                 }
-            } else {
-                $debuglog("No records returned from database query");
+            } catch (Exception $e) {
+                $debuglog("SQL ERROR: " . $e->getMessage());
+                $debuglog("SQL that failed: " . $sql);
+                $debuglog("SQL params: " . json_encode($params));
+                // For MySQL, try a simpler fallback approach.
+                if ($DB->get_dbfamily() === 'mysql' && $numericinsensitive && is_numeric($originalfieldvalue)) {
+                    $debuglog("SQL failed, will try fallback approach in next iteration");
+                }
             }
         } else {
             $debuglog("No field SQL generated - check field name validity");
